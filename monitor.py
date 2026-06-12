@@ -1,5 +1,6 @@
 import psutil
 import time
+import csv
 from rich.live import Live
 from rich.table import Table
 from rich.panel import Panel
@@ -46,6 +47,49 @@ def format_speed(kb_per_sec: float) -> str:
         return f"{kb_per_sec/1024:.2f} MB/s"
     return f"{kb_per_sec:.1f} KB/s"
 
+def get_latest_benchmark(log_path: str = "/home/ubuntu/ml_benchmark/benchmark_log.csv") -> Table:
+    bench_table = Table(box=box.SIMPLE, show_header=True, header_style="bold green")
+    bench_table.add_column("Benchmark History", style="green", width=22)
+    bench_table.add_column("Value", width=38)
+
+    try:
+        with open(log_path, "r") as f:
+            rows = list(csv.DictReader(f))
+
+        if not rows:
+            bench_table.add_row("Status", "No data yet")
+            return bench_table
+
+        valid = [r for r in rows if r.get("mean_ms") and r["mean_ms"].strip()][-3:]
+        latest = valid[-1]
+
+        mean = float(latest["mean_ms"])
+        color = "green" if mean < 200 else "yellow" if mean < 300 else "red"
+
+        bench_table.add_row("Last Run", latest["timestamp"])
+        bench_table.add_row("Mean Latency", Text(f"{mean:.1f} ms", style=color))
+        bench_table.add_row("Min Latency", f"{float(latest['min_ms']):.1f} ms")
+        bench_table.add_row("Max Latency", f"{float(latest['max_ms']):.1f} ms")
+        bench_table.add_row("Stdev", f"{float(latest['stdev_ms']):.1f} ms")
+        bench_table.add_row("─" * 20, "─" * 30)
+        bench_table.add_row("Run History", "Mean (ms)")
+
+        for row in valid:
+            if row.get("mean_ms") and row["mean_ms"].strip():
+                m = float(row["mean_ms"])
+                c = "green" if m < 200 else "yellow" if m < 300 else "red"
+                bench_table.add_row(
+                    row["timestamp"][11:16],
+                    Text(f"{m:.1f} ms", style=c)
+                )
+
+    except FileNotFoundError:
+        bench_table.add_row("Status", "benchmark_log.csv not found")
+    except Exception as e:
+        bench_table.add_row("Error", str(e)[:30])
+
+    return bench_table
+
 if __name__ == "__main__":
     print("Starting system monitor... Press Ctrl+C to exit\n")
     time.sleep(1)
@@ -73,7 +117,7 @@ if __name__ == "__main__":
             disk_used_gb = disk.used / 1024**3
             disk_total_gb = disk.total / 1024**3
 
-            # Network speed (per second)
+            # Network speed
             net1 = psutil.net_io_counters()
             time.sleep(0.5)
             net2 = psutil.net_io_counters()
@@ -126,8 +170,14 @@ if __name__ == "__main__":
                     f"{p.info['memory_percent']:.1f}"
                 )
 
+            # Benchmark panel
+            bench_table = get_latest_benchmark()
+
             timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-            content = Group(Columns([cpu_table, mem_table]), proc_table)
+            content = Group(
+                Columns([cpu_table, mem_table]),
+                Columns([proc_table, bench_table]),
+            )
             final = Panel(
                 content,
                 title=f"[bold green] System Monitor [/bold green] — [dim]{timestamp}[/dim]",
